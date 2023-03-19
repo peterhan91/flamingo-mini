@@ -356,6 +356,31 @@ class FlamingoOPT(FlamingoBaseModel):
         return filter(lambda layer: isinstance(layer, ModifiedLMBlock), self.lm.decoder.layers)
 
 
+class FlamingoLLAMA(FlamingoBaseModel):
+    config: FlamingoConfig
+    config_class = FlamingoConfig
+
+    def __init__(self, config: FlamingoConfig):
+        from transformers import LlamaForCausalLM, LlamaModel
+        assert config.lm.startswith('decapoda-research/llama')
+        super().__init__(config)
+
+        base_lm: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(config.lm)  # type: ignore
+
+        assert self.config.dim == base_lm.config.hidden_size, \
+            f"specified {self.config.dim=} in FlamingoConfig, but {config.lm} has hidden size={base_lm.config.hidden_size}"
+
+        base_lm.resize_token_embeddings(base_lm.config.vocab_size + 1)
+        self.lm: LlamaModel = base_lm.model
+        self.lm_head = base_lm.lm_head
+        self._init_layers(self.lm.layers)
+        
+    def get_modified_layers(self):
+        if self.config.xattn_every == 1:
+            return self.lm.layers
+        return filter(lambda layer: isinstance(layer, ModifiedLMBlock), self.lm.layers)
+
+
 class FlamingoModel(PreTrainedModel):
     """wrapper class for a FlamingoBase decending model (FlamingoGPT2 or FlamingoOPT)
 
