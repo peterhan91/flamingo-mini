@@ -35,16 +35,18 @@ class FlamingoProcessor:
         if config.lm.startswith('gpt2'):
             if use_fast:
                 from transformers import GPT2TokenizerFast
-
                 self.tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
             else:
                 from transformers import GPT2Tokenizer
-
                 self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+        
         elif config.lm.startswith('facebook/opt'):
             from transformers import AutoTokenizer
-            
             self.tokenizer = AutoTokenizer.from_pretrained('facebook/opt-30b', use_fast=use_fast)
+        
+        elif config.lm.startswith('decapoda-research/llama'):
+            from transformers import LlamaTokenizer
+            self.tokenizer = LlamaTokenizer.from_pretrained(config.lm)
         
         self.tokenizer.add_bos_token = True
         self.tokenizer.pad_token = self.tokenizer.eos_token

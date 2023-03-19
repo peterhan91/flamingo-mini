@@ -365,7 +365,9 @@ class FlamingoLLAMA(FlamingoBaseModel):
         assert config.lm.startswith('decapoda-research/llama')
         super().__init__(config)
 
-        base_lm: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(config.lm)  # type: ignore
+        base_lm: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(config.lm, 
+                                                                     load_in_8bit=True, 
+                                                                     device_map="auto")  # type: ignore
 
         assert self.config.dim == base_lm.config.hidden_size, \
             f"specified {self.config.dim} in FlamingoConfig, but {config.lm} has hidden size={base_lm.config.hidden_size}"
@@ -395,7 +397,8 @@ class FlamingoModel(PreTrainedModel):
     # value = Flamingo class for the respective language model
     _LANGUAGE_MODEL_VERSIONS = {
         'gpt2': FlamingoGPT2,
-        'facebook/opt': FlamingoOPT
+        'facebook/opt': FlamingoOPT,
+        'decapoda-research/llama': FlamingoLLAMA,
     }
     
     _keys_to_ignore_on_load_missing = [r"flamingo.vision_encoder"]
