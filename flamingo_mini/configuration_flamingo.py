@@ -5,7 +5,7 @@ class FlamingoConfig(PretrainedConfig):
     
     def __init__(
         self,
-        lm: str = 'gpt2',
+        lm: str = 'decapoda-research/llama-13b-hf', # 'gpt2'
         clip_model_type: str = 'openai/clip-vit-base-patch32',
         dim: int = 1024,
         dim_visual: int = 768,

@@ -1,0 +1,174 @@
+import os
+import pandas as pd
+import argparse
+from tqdm import tqdm
+from PIL import Image
+import h5py
+import cv2
+from typing import *
+from pathlib import Path
+
+
+def load_data(filepath):
+    dataframe = pd.read_csv(filepath)
+    return dataframe
+
+def get_cxr_paths_list(filepath): 
+    dataframe = load_data(filepath)
+    cxr_paths = dataframe['Path']
+    return cxr_paths
+
+'''
+This function resizes and zero pads image 
+'''
+def preprocess(img, desired_size=320):
+    old_size = img.size
+    ratio = float(desired_size)/max(old_size)
+    new_size = tuple([int(x*ratio) for x in old_size])
+    img = img.resize(new_size, Image.ANTIALIAS)
+    # create a new image and paste the resized on it
+
+    new_img = Image.new('L', (desired_size, desired_size))
+    new_img.paste(img, ((desired_size-new_size[0])//2,
+                        (desired_size-new_size[1])//2))
+    return new_img
+
+def img_to_hdf5(cxr_paths: List[Union[str, Path]], out_filepath: str, resolution=320): 
+    """
+    Convert directory of images into a .h5 file given paths to all 
+    images. 
+    """
+    dset_size = len(cxr_paths)
+    failed_images = []
+    with h5py.File(out_filepath,'w') as h5f:
+        img_dset = h5f.create_dataset('cxr', shape=(dset_size, resolution, resolution))    
+        for idx, path in enumerate(tqdm(cxr_paths)):
+            try: 
+                # read image using cv2
+                img = cv2.imread(str(path))
+                # convert to PIL Image object
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_pil = Image.fromarray(img)
+                # preprocess
+                img = preprocess(img_pil, desired_size=resolution)     
+                img_dset[idx] = img
+            except Exception as e: 
+                failed_images.append((path, e))
+    print(f"{len(failed_images)} / {len(cxr_paths)} images failed to be added to h5.", failed_images)
+
+def get_files(directory):
+    files = []
+    for (dirpath, dirnames, filenames) in os.walk(directory):
+        for file in filenames:
+            if file.endswith(".jpg"):
+                files.append(os.path.join(dirpath, file))
+    return files
+
+def get_cxr_path_csv(out_filepath, directory):
+    files = get_files(directory)
+    file_dict = {"Path": files}
+    df = pd.DataFrame(file_dict)
+    df.to_csv(out_filepath, index=False)
+
+def section_start(lines, section=' IMPRESSION'):
+    for idx, line in enumerate(lines):
+        if line.startswith(section):
+            return idx
+    return -1
+
+def section_end(lines, section_start):
+    num_lines = len(lines)
+
+def getIndexOfLast(l, element):
+    """ Get index of last occurence of element
+    @param l (list): list of elements
+    @param element (string): element to search for
+    @returns (int): index of last occurrence of element
+    """
+    i = max(loc for loc, val in enumerate(l) if val == element)
+    return i 
+
+def write_report_csv(cxr_paths, txt_folder, out_path, target="impression"):
+    imps = {"filename": [], target: []}
+    txt_reports = []
+    for cxr_path in cxr_paths:
+        tokens = cxr_path.split('/')
+        study_num = tokens[-2]
+        patient_num = tokens[-3]
+        patient_group = tokens[-4]
+        txt_report = txt_folder + patient_group + '/' + patient_num + '/' + study_num + '.txt'
+        filename = study_num + '.txt'
+        f = open(txt_report, 'r')
+        s = f.read()
+        s_split = s.split()
+        if target.upper() in s_split:
+            begin = getIndexOfLast(s_split, "IMPRESSION:") + 1
+            end = None
+            end_cand1 = None
+            end_cand2 = None
+            # remove recommendation(s) and notification
+            if "RECOMMENDATION(S):" in s_split:
+                end_cand1 = s_split.index("RECOMMENDATION(S):")
+            elif "RECOMMENDATION:" in s_split:
+                end_cand1 = s_split.index("RECOMMENDATION:")
+            elif "RECOMMENDATIONS:" in s_split:
+                end_cand1 = s_split.index("RECOMMENDATIONS:")
+
+            if "NOTIFICATION:" in s_split:
+                end_cand2 = s_split.index("NOTIFICATION:")
+            elif "NOTIFICATIONS:" in s_split:
+                end_cand2 = s_split.index("NOTIFICATIONS:")
+
+            if end_cand1 and end_cand2:
+                end = min(end_cand1, end_cand2)
+            elif end_cand1:
+                end = end_cand1
+            elif end_cand2:
+                end = end_cand2            
+
+            if end == None:
+                imp = " ".join(s_split[begin:])
+            else:
+                imp = " ".join(s_split[begin:end])
+        else:
+            imp = 'NO IMPRESSION'
+            
+        imps[target].append(imp)
+        imps["filename"].append(filename)
+        
+    df = pd.DataFrame(data=imps)
+    df.to_csv(out_path, index=False)
+
+
+
+if __name__ == "__main__":
+    
+    def parse_args():
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--csv_out_path', type=str, default='data/cxr_paths.csv', help="Directory to save paths to all chest x-ray images in dataset.")
+        parser.add_argument('--cxr_out_path', type=str, default='data/cxr.h5', help="Directory to save processed chest x-ray image data.")
+        parser.add_argument('--dataset_type', type=str, default='mimic', choices=['mimic', 'chexpert-test'], help="Type of dataset to pre-process")
+        parser.add_argument('--mimic_impressions_path', default='data/mimic_impressions.csv', help="Directory to save extracted impressions from radiology reports.")
+        parser.add_argument('--chest_x_ray_path', default='/deep/group/data/mimic-cxr/mimic-cxr-jpg/2.0.0/files', help="Directory where chest x-ray image data is stored. This should point to the files folder from the MIMIC chest x-ray dataset.")
+        parser.add_argument('--radiology_reports_path', default='/deep/group/data/med-data/files/', help="Directory radiology reports are stored. This should point to the files folder from the MIMIC radiology reports dataset.")
+        args = parser.parse_args()
+        return args
+    
+    args = parse_args()
+    if args.dataset_type == "mimic":
+        # Write Chest X-ray Image HDF5 File
+        get_cxr_path_csv(args.csv_out_path, args.chest_x_ray_path)
+        cxr_paths = get_cxr_paths_list(args.csv_out_path)
+        img_to_hdf5(cxr_paths, args.cxr_out_path)
+
+        #Write CSV File Containing Impressions for each Chest X-ray
+        write_report_csv(cxr_paths, args.radiology_reports_path, args.mimic_impressions_path)
+    elif args.dataset_type == "chexpert-test": 
+        # Get all test paths based on cxr dir
+        cxr_dir = Path(args.chest_x_ray_path)
+        cxr_paths = list(cxr_dir.rglob("*.jpg"))
+        cxr_paths = list(filter(lambda x: "view1" in str(x), cxr_paths)) # filter only first frontal views 
+        cxr_paths = sorted(cxr_paths) # sort to align with groundtruth
+        assert(len(cxr_paths) == 500)
+       
+        img_to_hdf5(cxr_paths, args.cxr_out_path)
