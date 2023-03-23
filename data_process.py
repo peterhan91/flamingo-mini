@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import argparse
+import glob
 from tqdm import tqdm
 from PIL import Image
 import h5py
@@ -33,7 +34,7 @@ def preprocess(img, desired_size=320):
                         (desired_size-new_size[1])//2))
     return new_img
 
-def img_to_hdf5(cxr_paths: List[Union[str, Path]], out_filepath: str, resolution=320): 
+def img_to_hdf5(cxr_paths, out_filepath: str, resolution=320): 
     """
     Convert directory of images into a .h5 file given paths to all 
     images. 
@@ -88,21 +89,30 @@ def getIndexOfLast(l, element):
     i = max(loc for loc, val in enumerate(l) if val == element)
     return i 
 
-def write_report_csv(cxr_paths, txt_folder, out_path, target="impression"):
-    imps = {"filename": [], target: []}
+def write_report_csv(df, txt_folder, out_path, target="impression"):
+    imps = {"filename": [], "dicom_id":[], target: []}
     txt_reports = []
-    for cxr_path in cxr_paths:
-        tokens = cxr_path.split('/')
-        study_num = tokens[-2]
-        patient_num = tokens[-3]
-        patient_group = tokens[-4]
-        txt_report = txt_folder + patient_group + '/' + patient_num + '/' + study_num + '.txt'
+    for n in tqdm(range(len(df))):
+        dfs = df.iloc[n]
+        # tokens = cxr_path.split('/')
+        # study_num = tokens[-2]
+        # patient_num = tokens[-3]
+        # patient_group = tokens[-4]
+        # txt_report = txt_folder + patient_group + '/' + patient_num + '/' + study_num + '.txt'
+        study_num = str(dfs['study_id'])
+        patient_num = str(dfs['subject_id'])
+        dicom_num = str(dfs['dicom_id'])
+        path = glob.glob(os.path.join(txt_folder, "*", 'p'+patient_num, 's'+study_num+'.txt'))
+        assert len(path) == 1
         filename = study_num + '.txt'
-        f = open(txt_report, 'r')
+        f = open(path[0], 'r')
         s = f.read()
         s_split = s.split()
         if target.upper() in s_split:
-            begin = getIndexOfLast(s_split, "IMPRESSION:") + 1
+            try: 
+                begin = getIndexOfLast(s_split, target.upper()+":") + 1
+            except: 
+                continue
             end = None
             end_cand1 = None
             end_cand2 = None
@@ -135,6 +145,7 @@ def write_report_csv(cxr_paths, txt_folder, out_path, target="impression"):
             
         imps[target].append(imp)
         imps["filename"].append(filename)
+        imps["dicom_id"].append(dicom_num)
         
     df = pd.DataFrame(data=imps)
     df.to_csv(out_path, index=False)
@@ -150,19 +161,24 @@ if __name__ == "__main__":
         parser.add_argument('--dataset_type', type=str, default='mimic', choices=['mimic', 'chexpert-test'], help="Type of dataset to pre-process")
         parser.add_argument('--mimic_impressions_path', default='data/mimic_impressions.csv', help="Directory to save extracted impressions from radiology reports.")
         parser.add_argument('--chest_x_ray_path', default='/deep/group/data/mimic-cxr/mimic-cxr-jpg/2.0.0/files', help="Directory where chest x-ray image data is stored. This should point to the files folder from the MIMIC chest x-ray dataset.")
-        parser.add_argument('--radiology_reports_path', default='/deep/group/data/med-data/files/', help="Directory radiology reports are stored. This should point to the files folder from the MIMIC radiology reports dataset.")
+        parser.add_argument('--radiology_reports_path', default='../Stanford_MIT_CHEST/MIMIC-CXR-v2.0/reports/files', help="Directory radiology reports are stored. This should point to the files folder from the MIMIC radiology reports dataset.")
         args = parser.parse_args()
         return args
     
     args = parse_args()
     if args.dataset_type == "mimic":
         # Write Chest X-ray Image HDF5 File
-        get_cxr_path_csv(args.csv_out_path, args.chest_x_ray_path)
-        cxr_paths = get_cxr_paths_list(args.csv_out_path)
+        # get_cxr_path_csv(args.csv_out_path, args.chest_x_ray_path)
+        # cxr_paths = get_cxr_paths_list(args.csv_out_path)
+        df = pd.read_csv('../Stanford_MIT_CHEST/MIMIC-CXR-v2.0/csvs/mimic-cxr-jpg-chest-radiographs-with-structured-labels-2.0.0/mimic-cxr-2.0.0-split.csv')
+        train_df = df[df['split']=='train']
+        #Write CSV File Containing Impressions for each Chest X-ray
+        write_report_csv(train_df, args.radiology_reports_path, args.mimic_impressions_path)
+        # convert cxr images into one h5df file
+        cxr_paths = [os.path.join('../Stanford_MIT_CHEST/MIMIC-CXR-v2.0/mimic-cxr', x) for x in train_df['dicom_id']]
         img_to_hdf5(cxr_paths, args.cxr_out_path)
 
-        #Write CSV File Containing Impressions for each Chest X-ray
-        write_report_csv(cxr_paths, args.radiology_reports_path, args.mimic_impressions_path)
+
     elif args.dataset_type == "chexpert-test": 
         # Get all test paths based on cxr dir
         cxr_dir = Path(args.chest_x_ray_path)
