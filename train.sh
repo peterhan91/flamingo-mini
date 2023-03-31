@@ -1,6 +1,6 @@
 #!/bin/env bash
 
-export CUDA_VISIBLE_DEVICES=2,3
+export CUDA_VISIBLE_DEVICES=1,2
 NUM_GPU=2
 
 ARGS="
@@ -11,8 +11,8 @@ ARGS="
 --learning_rate 0.0001 
 --warmup_steps 5000
 --lr_scheduler_type constant_with_warmup
---per_device_train_batch_size 8
---per_device_eval_batch_size 64
+--per_device_train_batch_size 1
+--per_device_eval_batch_size 1
 --gradient_accumulation_steps 1
 --evaluation_strategy steps
 --eval_steps 1000

@@ -19,7 +19,7 @@ class FlamingoProcessor:
     def __init__(
         self,
         config: FlamingoConfig,
-        use_fast: bool = True,
+        use_fast: bool = False,
         eoc_token: str = '<EOC>'
     ):
         """

@@ -3,25 +3,23 @@ Use Huggingface Trainer with FlamingoModel.
 
 This is a working demo script which you can adapt to your needs.
 """
+import os
+os.environ["WANDB_DISABLED"] = "true"
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional
 import random
 
 import torch
-from torch.optim import AdamW
+# torch.backends.cuda.matmul.allow_tf32 = True
 from torch.utils.data import Dataset
-
 from torchvision import transforms as T
-from torchvision.datasets import CocoCaptions
+from cxr_dataset import CXRDataset
 
 import transformers
 from transformers import HfArgumentParser, CLIPImageProcessor
 from transformers.trainer import Trainer, TrainingArguments
-from transformers.optimization import get_constant_schedule_with_warmup
-
 from flamingo_mini import FlamingoConfig, FlamingoModel, FlamingoProcessor
-
 from eval import evaluate_image_captioning  # don't ask me why this import works
 
 
@@ -29,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 
 # get images and annotations from https://cocodataset.org/#download
-COCO_ROOT      = '/nfs/data3/zhangya/coco2017/images'
-COCO_ANN_TRAIN = '/nfs/data3/hansmair/coco2017/captions_train2017.json'
-COCO_ANN_VAL   = '/nfs/data3/hansmair/coco2017/captions_val2017.json'
+cxr_filepath = '/media/tianyu.han/mri-scratch/DeepLearning/Stanford_MIT_CHEST/MIMIC-CXR-v2.0/mimic-cxr/'
+txt_filepath = './data/mimic_impressions.csv'
+txt_filepath_val = './data/mimic_impressions_val.csv'
 
 
 class CLIPImageTransform:
@@ -42,30 +40,37 @@ class CLIPImageTransform:
         self.vision_processor = CLIPImageProcessor.from_pretrained(clip_model_type) # type: ignore
 
     def __call__(self, image) -> torch.Tensor:
-        return self.vision_processor(images=image, return_tensors="pt", padding=True)['pixel_values']
+        return self.vision_processor(images=image, 
+                                     return_tensors="pt", padding=True)['pixel_values']
 
         
 def prepare_training_dataset(config: FlamingoConfig):
     """ prepare a CocoCaptions training dataset """
     transform = T.Compose([
+        T.Resize(config.img_size, interpolation=T.InterpolationMode.BICUBIC),
         T.RandomHorizontalFlip(),                       # add your favorite transforms
+        T.ToTensor(),
         CLIPImageTransform(config.clip_model_type)
     ])
 
     def target_transform(captions):
-        return f"{random.choice(['', ' '])}<image>{random.choice(captions)}<EOC></s>"
+        return f"{random.choice(['', ' '])}<image>{captions}<EOC></s>"
 
-    return CocoCaptions(
-        COCO_ROOT, 
-        COCO_ANN_TRAIN, 
-        transform=transform,
-        target_transform=target_transform
-    )
+    return CXRDataset(img_path=cxr_filepath,
+                    txt_path=txt_filepath, 
+                    column='findings', 
+                    transform=transform,
+                    target_transform=target_transform)
     
 
 def prepare_evaluation_dataset(config: FlamingoConfig):
-    return CocoCaptions(COCO_ROOT, COCO_ANN_VAL, 
-        transform=CLIPImageTransform(config.clip_model_type))
+    return CXRDataset(img_path=cxr_filepath,
+                    txt_path=txt_filepath_val, 
+                    column='findings', 
+                    transform=T.Compose([T.Resize(config.img_size, interpolation=T.InterpolationMode.BICUBIC),
+                                         T.ToTensor(),
+                                        CLIPImageTransform(config.clip_model_type)])
+                    )
 
 
 class DataCollator:
@@ -97,30 +102,14 @@ class FlamingoTrainer(Trainer):
     args: FlamingoTrainingArguments
     model: FlamingoModel
     processor: FlamingoProcessor
-    eval_dataset: CocoCaptions
+    eval_dataset: CXRDataset
     
     def evaluate(self,
         eval_dataset: Optional[Dataset] = None,
         ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval"
     ) -> Dict[str, float]:
-        """ override evaluation method to inject custom behavior. 
-        TODO this only runs on one GPU, how to do distributed evaluation?
-        """
-        metrics = evaluate_image_captioning(self.eval_dataset, self.model, 
-            prefix=self.args.eval_coco_captioning_prefix,
-            start=self.args.eval_coco_captioning_start,
-            end=self.args.eval_coco_captioning_end,
-            batch_size=self.args.per_device_eval_batch_size,
-            num_workers=self.args.dataloader_num_workers
-        )
-        metrics = {f"{metric_key_prefix}_{k}" : v for k, v in metrics.items()}
-
-        # HF trainer stuff from overridden method
-        self.log(metrics)
-        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, metrics)
-        self._memory_tracker.stop_and_update_metrics(metrics)
-        return metrics
+        pass
     
     
 if __name__ == '__main__':
@@ -147,10 +136,10 @@ if __name__ == '__main__':
 
     logger.info('loading model...')
     config = FlamingoConfig(
-        clip_model_type='openai/clip-vit-large-patch14',
-        lm='facebook/opt-125m',
-        dim=768,
-        dim_visual=1024,
+        clip_model_type='openai/clip-vit-base-patch32',
+        lm='gpt2-xl',
+        dim=1600,
+        dim_visual=768,
         xattn_act='sqrelu',
         resampler_act='sqrelu'
     )

@@ -4,7 +4,7 @@ from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset, Subset, DataLoader
 from torchvision.datasets import CocoCaptions
-from pycocoevalcap.eval import COCOEvalCap
+# from pycocoevalcap.eval import COCOEvalCap
 
 from flamingo_mini import FlamingoModel, FlamingoProcessor
 
@@ -39,8 +39,8 @@ def evaluate_image_captioning(
     processor = FlamingoProcessor(model.config)
     results: List[dict] = []
     
-    wrapper = MyDatasetWrapper(dataset)
-    wrapper = Subset(wrapper, range(start, end if end is not None else len(wrapper)))
+    # wrapper = MyDatasetWrapper(dataset)
+    wrapper = Subset(dataset, range(start, end if end is not None else len(wrapper)))
     loader = DataLoader(
         wrapper, batch_size=batch_size, shuffle=False, drop_last=False, pin_memory=True,
         num_workers=num_workers)

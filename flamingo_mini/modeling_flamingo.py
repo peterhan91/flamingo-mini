@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 import contextlib
 import logging
+import os
 
 import torch
 import torch.nn as nn
@@ -315,7 +316,15 @@ class FlamingoGPT2(FlamingoBaseModel):
         assert config.lm.startswith('gpt')
         super().__init__(config)
 
-        base_lm: GPT2LMHeadModel = GPT2LMHeadModel.from_pretrained(config.lm)  # type: ignore
+        device_map = "auto"
+        world_size = int(os.environ.get('WORLD_SIZE', 1))
+        ddp = world_size != 1
+        if ddp:
+            device_map = {'':int(os.environ.get('LOCAL_RANK') or 0)}
+        base_lm: GPT2LMHeadModel = GPT2LMHeadModel.from_pretrained(config.lm,    
+                                                                   # load_in_8bit=True,
+                                                                   # device_map=device_map
+                                                                   )  # type: ignore
         
         assert self.config.dim == base_lm.config.n_embd, \
             f"specified {self.config.dim} in FlamingoConfig, but {config.lm} has hidden size={base_lm.config.n_embd}"

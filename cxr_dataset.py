@@ -1,7 +1,7 @@
-import h5py
+import os
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+from PIL import Image
 
 import torch
 from torch.utils import data
@@ -20,36 +20,35 @@ class CXRDataset(data.Dataset):
         data_cache_size: Number of HDF5 files that can be cached in the cache (default=3).
         transform: PyTorch transform to apply to every data instance (default=None).
     """
-    def __init__(self, img_path, txt_path, column='report', size=None, transform=None):
+    def __init__(self, img_path, txt_path, column='findings', 
+                 transform=None, target_transform=None):
         super().__init__()
-        if size != None: 
-            self.img_dset = h5py.File(img_path, 'r')['cxr_unprocessed'][:size]
-            self.txt_dset = pd.read_csv(txt_path)[column][:size]
-        else: 
-            self.img_dset = h5py.File(img_path, 'r')['cxr_unprocessed']
-            self.txt_dset = pd.read_csv(txt_path)[column]
+
+        self.df = pd.read_csv(txt_path)
+        self.col = column
+        self.img_path = img_path
+        self.df = self.df.filter(items=['dicom_id', column]).dropna()
         self.transform = transform
+        self.target_transform = target_transform
             
     def __len__(self):
-        return len(self.txt_dset)
+        return len(self.df)
     
     def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-            
-        img = self.img_dset[idx] # np array, (320, 320)
-        img = np.expand_dims(img, axis=0)
-        img = np.repeat(img, 3, axis=0)
-        txt = self.txt_dset[idx] # python str
-        if type(txt) == type(float("nan")): # capture the case of empty "Impression" sections
-            txt = " "
-
-        img = torch.from_numpy(img) # torch, (3, 320, 320)
+        dfs = self.df.iloc[idx]
+        img = Image.open(os.path.join(self.img_path, dfs['dicom_id']+'.jpg'))
+        img = img.convert('RGB')
+        txt = dfs[self.col]
         if self.transform:
             img = self.transform(img)
-        sample = {'img': img, 'txt': txt }
+        if self.target_transform:
+            txt = self.target_transform(txt)
+
+        # print(img.shape, len(txt))
+        # sample = {'img': img, 'txt': txt}
+        return img, txt    
         
-        return sample
+
 
 def load_data(cxr_filepath, txt_filepath, batch_size=4, column='report', pretrained=False, verbose=False): 
     if torch.cuda.is_available():  
